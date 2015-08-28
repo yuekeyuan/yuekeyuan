@@ -1,1 +1,718 @@
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDeGKt8KfiQwxnKEi8xJCFUOwfvNXqdNSzruX25vj8d8CwVMWPeSc7hRpeq6clafDpPhP6YiQi2M1qClEPmJvACXCEWyDYv1fAUjTlAYsm4ZHEfWBn+2NQ+zvHYr/+uj5NO6DxWWGDf1pv5yqEiQIN9DU7mrX8Vn3xalYcjYIAJkE1TSBEIS67mAHnRn3rmLQWXnC72j/tM1ULw8D6v/FO12GG2KViJQ/4zc8Q846UAszLG1Uc1tK6kj2mc0E4Upr+Nx6hBrVPfNRE5leS1GiwvvPOdE6/CGHNWfJLm9z8kB8ByVEJLTtAd2FYe9Niw65IiSqttQFMsCMueTmOmxEMN Administrator@YUEKEYUAN
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file lex
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+var args = require("./args");
+var fs = require("fs");
+var utils = require("./utils")
+var SUFFIX = "yky";
+var singleMark = ["html", "blank", "extends", "include", "param"];
+var doubleMark = ["list", "map", "block"];
+
+////////////////////////////////////////////////////////////////////////
+// 对 slice 进行判断，判断他的属性，作用，返回他的具体类型
+////////////////////////////////////////////////////////////////////////
+var getSliceType = function(begin, end, content){
+	var slice = content.substring(begin, end); //  最长的是{{end block
+	//判断是否为 空字符串
+	if(utils.trim(slice).length == 0)
+		return ["blank",];
+	//单列属性
+	if(utils.startWith(utils.ltrim(slice), "{{extends"))
+		return ["extends",];
+	if(utils.startWith(utils.ltrim(slice), "{{include"))
+		return ["include",];
+	if(utils.startWith(utils.ltrim(slice), "{{`"))
+		return ["param",];
+	if(utils.startWith(utils.ltrim(slice), "{{="))
+		return ["param",];
+	//双列属性
+	if(utils.startWith(utils.ltrim(slice), "{{list"))
+		return ["list",];
+	if(utils.startWith(utils.ltrim(slice), "{{map"))
+		return ["map",];
+	if(utils.startWith(utils.ltrim(slice), "{{block"))
+		return ["block",];
+	if(utils.startWith(utils.ltrim(slice), "{{end block"))
+		return ["end", "block"];
+	if(utils.startWith(utils.ltrim(slice), "{{end map"))
+		return ["end", "map"];
+	if(utils.startWith(utils.ltrim(slice), "{{end list"))
+		return ["end", "list"];
+	//默认返回值
+	return ["html"];
+}
+
+
+////////////////////////////////////////////////////////////////////////
+// 对 slice进行拆分, 将标签进行一个大的归类，
+//  extends， block， param， list
+//  map， define 等
+////////////////////////////////////////////////////////////////////////
+var split = function(str) {
+	//获取切片点
+	var arr = [];
+	var stacklen = 0;
+	var cutPoint = [ 0, ];
+	for (var i = 0; i < str.length; i++) {
+		if (str[i] == "{" && str[i + 1] == "{") {
+			if (stacklen++ == 0) {
+				cutPoint.push(i);
+			}
+		} else if (str[i] == "}" && str[i + 1] == "}") {
+			if (stacklen-- == 1) {
+				cutPoint.push(i + 2);
+				i++;
+			}
+		}
+	}
+	cutPoint.push(str.length);
+	//对文件进行切片
+	stacklen = 0;
+	for (i = 0, size = cutPoint.length - 1; i < size; i++) {
+		var type = getSliceType(cutPoint[i], cutPoint[i+1], str);
+		if(type[0] == "blank") continue;
+		arr.push({
+			"type":type,
+			"content":str.substring(cutPoint[i], cutPoint[i + 1])});
+	}
+	return arr;
+};
+
+
+////////////////////////////////////////////////////////////////////////
+// 将文件拉入内存， 并处理文件
+////////////////////////////////////////////////////////////////////////
+var analysFile = function(file, type) {
+	type = type || "file";
+
+	name = file.substring(file.lastIndexOf(args.spliter) + 1);
+	prefix = name.substring(0, name.lastIndexOf("."));
+	suffix = name.substring(name.lastIndexOf(".") + 1);
+	var content = "";
+	var contentList = [];
+	var temContentList = [];
+	if (suffix.toLowerCase() != SUFFIX) {
+		throw new error("not the proper file: file: " + file);
+	} else {
+		content = fs.readFileSync(file, 'utf-8');
+		if (content == "" || content == null) {
+			return [];
+		} else {
+			// 对语法进行最基础的划分
+			return split(content);
+		}
+	}
+}
+
+
+////////////////////////////////////////////////////////////////////////
+// 文件处理的总入口
+////////////////////////////////////////////////////////////////////////
+var generateFile = function(fileName) {
+	//对文件进行切片
+	var splitSlice = analysFile(fileName);
+	//对切片后的文件进行重建
+	var rebuildSlice = genFun(splitSlice);
+
+	console.log("JSONED FILE\n", JSON.stringify(rebuildSlice, 4, 4), "\n\n");
+/*
+	while (loop != -1) {
+		newSpliltSlice = analysFile(splitSlice[loop]["fileName"]);
+		splitSlice = mergeExtendsSlice(newSpliltSlice, splitSlice);
+		loop = isContainExtends(splitSlice);
+	}
+*/
+	return rebuildSlice;
+};
+
+////////////////////////////////////////////////////////////////////////
+// 文件处理的总入口
+////////////////////////////////////////////////////////////////////////
+var genFun = function(slice, begin, end){
+	var begin = begin || 0;
+	var end   = end   || slice.length;
+	var rebuildSlice = [];
+	var index = 0;
+
+	for(index=begin; index < end;){
+		if(singleMark.indexOf(slice[index]["type"][0]) >= 0){  //单列属性
+			rebuildSlice.push(slice[index++]);
+		}else{									  //多列属性
+			var tem = markDouble(slice, index);
+			index = tem[0];
+			rebuildSlice.push(tem[1]);
+		}
+		console.log("index:\n", index);
+	}
+	return rebuildSlice;
+}
+
+////////////////////////////////////////////////////////////////////////
+// 对 doubleMark  的处理
+////////////////////////////////////////////////////////////////////////
+var markDouble = function(slice, index){
+	var rebuildSlice = [];
+	var stacklen = 0;
+	do{
+		if(slice[index]["type"][0] == "end"){                   //处理end
+			stacklen--;
+			if(stacklen == 0){
+				index ++;
+				tem = genFun(rebuildSlice, 1);
+				rebuildSlice[0]["chirldren"] = tem;
+				rebuildSlice = rebuildSlice[0];
+			}else{
+				rebuildSlice.push(slice[index++]);
+			}
+		}else
+
+		if(singleMark.indexOf(slice[index]["type"][0]) >= 0){    //单列属性
+			rebuildSlice.push(slice[index++]);
+		}else{													//多列属性
+			stacklen ++;
+			rebuildSlice.push(slice[index++]);
+		}
+	}while(stacklen != 0);
+
+	return [index, rebuildSlice];
+}
+
+module.exports = {
+	generateFile : generateFile
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file utils
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var path = require("path");
+
+var getMime = function(fileName, mimeCollection) {
+	a = mimeCollection["suffix"][fileName
+			.substring(fileName.lastIndexOf(".") + 1)];
+	console.log("filename:", fileName);
+	console.log(fileName.substring(fileName.lastIndexOf(".") + 1));
+	console.log(a);
+	return a;
+}
+
+var ltrim = function(s) {
+	return s.replace(/^\s*/, "");
+}
+
+var rtrim = function(s) {
+	return s.replace(/\s*$/, "");
+}
+
+var trim = function(s) {
+	return rtrim(ltrim(s));
+}
+
+var startWith = function(orign, str) {
+	if (str == null || str == "" || orign.length == 0
+			|| str.length > orign.length)
+		return false;
+	if (orign.substr(0, str.length) == str)
+		return true;
+	else
+		return false;
+	return true;
+}
+
+var endWith = function(orign, str) {
+	if (str == null || str == "" || orign.length == 0
+			|| str.length > orign.length)
+		return false;
+	if (orign.substring(orign.length - str.length) == str)
+		return true;
+	else
+		return false;
+	return true;
+}
+
+module.exports = {
+	"getMime" : getMime,
+	"ltrim" : ltrim,
+	"rtrim" : rtrim,
+	"trim" : trim,
+	"startWith" : startWith,
+	"endWith" : endWith,
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file args
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+os = require("os");
+var spliter = "\\";
+var newLine = os["EOL"];
+var newLine = "\n";
+var BASE_DIR = __dirname.substring(0, __dirname.lastIndexOf(""));
+
+module.exports = {
+  spliter: spliter,
+  newLine: newLine,
+  BASE_DIR: BASE_DIR,
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file config
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var path = require("path");
+/**
+ * url 映射， 包含 静态的url 地址映射 (append方法加载)
+ * 和动态的 url 处理函数映射。
+ */
+url = {
+    "/": "controller.index.get",
+    "/hello": {
+        "/world":"controller.index.put",
+        "::GET" : "controller.index.put",
+        "::POST": "controller.index.post"
+    }
+};
+
+exports.url = url;
+
+
+
+/**
+ * 静态资源的映射表
+ * suffix 用于判断是否是静态资源，
+ * res:通过url 判断是否为静态资源，不建议使用。
+ * exclude： 通过 url 排除一部分 静态资源， 也没想好怎么使用。
+ */
+mime = {
+    suffix: {
+        txt: "text/plain",
+        css: "text/css",
+        js: "text/javascript",
+        jpg: "image/jpg",
+        gif: "image/gif",
+        png: "image/png"
+        //and so on
+    },
+    reg: {},
+    exclude: {}
+};
+exports.mime = mime;
+
+//静态资源位置
+var cssDirectory = path.join("resource", "css");
+var jsDirectory = path.join("resource", "js");
+var imageDirectory = path.join("resource", "img");
+staticUrlDirectory = {
+    "css": cssDirectory,
+    "js": jsDirectory,
+    "jpg": imageDirectory,
+    "gif": imageDirectory,
+    "png": imageDirectory
+};
+exports.staticUrlDirectory = staticUrlDirectory;
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file static
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var fs = require('fs');
+var url = require('url');
+var BASE_DIR = __dirname;
+var configMime = require("../config").mime;
+var configStaticUrlMapping = require("../config").staticUrlDirectory;
+var utils = require("./utils");
+var querystring = require("querystring");
+
+var faviconFile = null;
+
+function StaticRouter() {
+
+    this.processRequest = function(req, res){
+        var path = url.parse(req.url).pathname;
+        console.log(path);
+        //处理静态资源
+        var result = this.isStaticFileRequest(req, res);
+        if(result != false && result != undefined){
+            return this.processStaticRequest(req, res, result);
+        }
+        //处理 非静态 url 资源请求
+        var param = this.wrapRequest(req, res);
+        this.processDynamicRequest(req, res, param);
+    };
+
+    //静态资源发送
+    this.processStaticRequest = function(req, res,mime) {
+        //处理 favicon
+        if (mime == true && faviconFile != null){
+            res.writeHead(200, {"Content-Type": "image/ico"});
+            res.write(faviconFile, "binary");
+            res.end();
+            return;
+        }
+
+        //开始处理 文件
+        var pathName = url.parse(req.url).pathname;
+        var suffix = pathName.substr(pathName.lastIndexOf(".") + 1);
+        contentPath = BASE_DIR.substring(0, BASE_DIR.lastIndexOf("\\"));
+        var realPath = contentPath + "\\" + configStaticUrlMapping[suffix] + "\\" + pathName.substring(1,pathName.length);
+
+        fs.exists(realPath, function(exists){
+            if(!exists){
+                res.writeHead(404, {"Content-Type": "text/plain"});
+                res.write("file not found");
+                res.end();
+                return;
+            } else {
+                fs.readFile(realPath, function(err, file){
+                    if(err){
+                        res.writeHead(500, {"Content-Type": "text/plain"});
+                        res.end(err);
+                        return;
+                    }else{
+                        res.writeHead(200, {"Content-Type" : mime});
+                        res.write(file, "binary");
+                        res.end();
+                        return;
+                    }
+                });
+            }
+        });
+    };
+
+    this.isStaticFileRequest = function(req, res) {
+        var pathName = url.parse(req.url).pathname;
+        //判断是否是favicon
+        if (pathName == "/favicon.ico")
+            return true;
+        var suffix = pathName.substr(pathName.lastIndexOf(".") + 1);
+        if(configMime["suffix"][suffix] != undefined){
+            return configMime["suffix"][suffix];
+        }
+    };
+
+    this.init = function(){
+        //加载favicon, 保存为静态资源
+        path = BASE_DIR.substr(0,BASE_DIR.lastIndexOf("\\")) + "\\" + "favicon.ico";
+        fs.exists(path, function (exists) {
+            fs.readFile(path, "binary", function(err, file){
+                faviconFile = file;
+            })
+        });
+    };
+    this.init();
+}
+
+module.exports = StaticRouter;
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file dymaic
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var urlConfig = require("../config").url;
+url = require("url");
+var controller = require("../controller/init");
+
+/**
+ * 加载 并 翻译 url
+ */
+function loadUrl(){
+    list = [];
+    this.getList = function(){
+        return list;
+
+    };
+
+    var isJson = function(obj){
+        var isjson = typeof(obj) == "object" && Object.prototype.toString.call(obj).toLowerCase() == "[object object]" && !obj.length;
+        return isjson;
+    };
+
+    this.parseUrl = function(urlconfig, map){
+        var newMap = null;
+        for(var key in urlconfig){
+            if (!isJson(urlconfig[key])){
+                newMap = JSON.parse(JSON.stringify(map));
+                newMap["url"] += key;
+                var tem = joinParam(key, urlconfig[key], newMap);
+                list.push(tem);
+            } else {
+                newMap = JSON.parse(JSON.stringify(map));
+                newMap["url"] += key;
+                parse(key, urlconfig[key], newMap);
+            }
+        }
+        spiltUrls();
+    };
+
+    var joinParam = function(key, value, map){
+        //拷贝 map 对象
+        var newMap = JSON.parse(JSON.stringify(map));
+        if(!isJson(value)){
+            switch (key.toUpperCase()){
+                //先不处理
+                case "LOAD-ORDER":
+                case "*":
+                case "$":
+                    break;
+                //method
+                case "::GET":
+                case "::POST":
+                case "::PUT":
+                case "::DELETE":
+                case "::MOVE":
+                    newMap["method"] = key.substr(2);
+                    newMap["func"] = value;
+                    break;
+                default :
+                    newMap["func"] = value;
+                    break;
+            }
+        }
+        return newMap;
+    };
+
+    //将单独的数据添加进map value 在这里 是一个map
+    var parse = function(key, value, map){
+        var newMap = null;
+        if (!isJson(value)){
+            var tem = joinParam(key, value, map);
+            list.push(tem);
+        }
+        else {
+            newMap = JSON.parse(JSON.stringify(map));
+            for (var key1 in value) {
+                switch (key1.toUpperCase()){
+                    case "*":
+                    case "$":
+                    case "load-order":
+                        return;
+                    case "::GET":
+                    case "::POST":
+                    case "::PUT":
+                    case "::DELETE":
+                        break;
+                    default :
+                        newMap["url"] += ("/" + key1);
+                }
+                newMap = JSON.parse(JSON.stringify(newMap));
+                parse(key1, value[key1], newMap);
+            }
+        }
+    };
+
+
+    var spiltUrls = function () {
+        for(var i=0;i<list.length;i++){
+            var str = list[i]["url"];
+            if (str == null){
+                continue;
+            }
+            list[i]["split"] = splitUrl(str);
+        }
+    };
+
+    var splitUrl = function(str){
+        ls = str.split("/");
+        var a = [];
+        for(var i in ls){
+            if (ls[i]!="" && ls[i] != undefined){
+                // TODO: 这儿有一个大bug， 对于 * 不能够转换成 正则式。
+                a.push(RegExp("^" + ls[i] + "$"));
+            }
+        }
+        return a;
+    };
+
+    var sortUrl = function () {
+        // TODO: task to be designed and finished
+    };
+
+    var compare = function(record1, record2){
+        // TODO: a heavy task!
+    }
+}
+
+
+function MatchUrl(){
+    var urlList = [];
+    this.setUrlList = function(list){
+        urlList = list;
+    }
+    /**
+     * 现在开始实现方法上的对比
+     * @param str
+     * @returns {*}
+     */
+    this.match = function(str, method){
+        var mostMatched = null;
+        ls = splitUrl(str);
+
+        for(var i= 0, flag=1;i< urlList.length;i++,flag=1){
+            var tem = urlList[i]["split"];
+            if(ls.length != tem.length){
+                continue;
+            }
+            for(var j=0;j<ls.length;j++){
+                //开始逐参对比
+                if(ls[j].match(tem[j]) == null){
+                    flag = 0;
+                    break;
+                }
+            }
+            //匹配上了
+            if(flag == 1){
+                if(urlList[i]["method"] == method){
+                    return urlList[i]["func"];
+                }
+                mostMatched = urlList[i]["func"];
+            }
+        }
+        //都没匹配上
+        return mostMatched;
+    };
+
+    var splitUrl = function(str){
+        ls = str.split("/");
+        var a = [];
+        for(var i in ls){
+            if (ls[i]!="" && ls[i] != undefined){
+                a.push(ls[i]);
+            }
+        }
+        return a;
+    };
+
+
+}
+
+/**
+ * 动态资源的路由操作
+ * @constructor
+ */
+function DynamicRouter(){
+    this.urlConfig = null;
+    var matchUrl = new MatchUrl();
+
+    this.processDynamicRequest = function(req, res){
+        param = wrapRequest(req);
+        var handler = mapUrl2Handler(param);
+        if(handler == null){
+            res.writeHead(404, {"Content-Type": "text/plain"});
+            res.end("404 fault");
+            return;
+        }
+        console.log(handler);
+        execute(req, res, param, handler);
+    };
+
+    var wrapRequest = function(req){
+        info = {};
+        info["url"] = url.parse(req.url).pathname;
+        info["headers"] = req.headers;
+        info["method"] = req.method;
+        data = url.parse(req.url, true).query;
+        info["data"] = data;
+
+        /*
+         对于其他数据，我们不做强求，需要的时候再获取。
+         if(info["method"].toUpperCase() != "GET"){
+         var postData = "";
+         req.addListener("data", function(postDataChunk){
+         postData += postDataChunk;
+         });
+         req.addListener("end",function(){
+         info["param"] = param = querystring.parse(postData);
+         return info;
+         });
+         } else {
+         return info;
+         }
+         */
+        return info;
+    };
+
+    /**
+     * 通过url 匹配 获取执行的handler
+     * @param param
+     */
+    var mapUrl2Handler = function(param){
+        str = matchUrl.match(param["url"], param["method"]);
+        if(str == null){
+            return "controller.index.get";
+        }
+        return str;
+    }
+
+    var execute = function(req, res, param, handler){
+        eval(handler + "(req, res, param)");
+    }
+
+    /**
+     * 初始化controller
+     */
+    this.init = function(){
+        console.log("加载 controller 控制层");
+        this.urlConfig = urlConfig;
+        var parser = new loadUrl();
+        parser.parseUrl(this.urlConfig, {"url":""});
+        this.urlList = parser.getList();
+        matchUrl.setUrlList(this.urlList);
+    };
+    this.init();
+}
+
+module.exports = DynamicRouter;
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file router
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var fs = require('fs');
+var url = require('url');
+var BASE_DIR = __dirname;
+var configMime = require("../config").mime;
+var configStaticUrlMapping = require("../config").staticUrlDirectory;
+var querystring = require("querystring");
+var controller = require("../controller/init");
+var DynamicRouter = require("./dynamicRouter");
+var dynamicRouter = new DynamicRouter();
+var StaticRouter  = require("./staticRouter");
+var staticRouter    = new StaticRouter();
+
+var faviconFile = null;
+/**
+ * process 类
+ * @constructor
+ */
+function Processor() {
+
+    this.processRequest = function(req, res){
+        var path = url.parse(req.url).pathname;
+        console.log(path);
+        var result = this.isStaticFileRequest(req);
+        if(result != false && result != undefined){
+            staticRouter.processStaticRequest(req, res, result);
+        }else{
+            dynamicRouter.processDynamicRequest(req, res);
+        }
+    };
+
+    this.isStaticFileRequest = function(req) {
+        var pathName = url.parse(req.url).pathname;
+        //判断是否是favicon
+        if (pathName == "/favicon.ico")
+            return true;
+        var suffix = pathName.substr(pathName.lastIndexOf(".") + 1);
+        if(configMime["suffix"][suffix] != undefined){
+            return configMime["suffix"][suffix];
+        }
+    };
+
+    this.init = function(){
+        //加载favicon, 保存为静态资源
+        path = BASE_DIR.substr(0,BASE_DIR.lastIndexOf("\\")) + "\\" + "favicon.ico";
+        fs.exists(path, function (exists) {
+            fs.readFile(path, "binary", function(err, file){
+                faviconFile = file;
+            })
+        });
+    };
+    this.init();
+}
+
+module.exports = Processor;
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// file router
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
