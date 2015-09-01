@@ -1,8 +1,8 @@
 var args = require("./args");
 var fs = require("fs");
-var utils = require("./utils")
-var SUFFIX = "yky";
-var singleMark = ["html", "blank", "extends", "include", "param"];
+var utils = require("./utils");
+var SUFFIX = args.SUFFIX;
+var singleMark = ["html", "blank", "extends", "include", "param", "=",];
 var doubleMark = ["list", "map", "block"];
 
 ////////////////////////////////////////////////////////////////////////
@@ -21,15 +21,6 @@ var generateFile = function(fileName) {
     var expands = includeAndExtends(rebuildpiece);
     //console.log("expands\n", JSON.stringify(expands, 4, 4), "\n\n");
 
-
-    /*
-     /*
-     while (loop != -1) {
-     newSpliltpiece = analysFile(splitpiece[loop]["fileName"]);
-     splitpiece = mergeExtendspiece(newSpliltpiece, splitpiece);
-     loop = isContainExtends(splitpiece);
-     }
-     */
     return expands;
 };
 
@@ -66,7 +57,6 @@ var getSpiltParamenter = function(piece){
 //  map， define 等
 ////////////////////////////////////////////////////////////////////////
 var split = function(str) {
-    //获取切片点
     var arr = [];
     var stacklen = 0;
     var cutPoint = [ 0, ];
@@ -100,24 +90,24 @@ var split = function(str) {
 ////////////////////////////////////////////////////////////////////////
 var analysFile = function(file, type) {
     type = type || "file";
-
-    name = file.substring(file.lastIndexOf(args.spliter) + 1);
-    prefix = name.substring(0, name.lastIndexOf("."));
-    suffix = name.substring(name.lastIndexOf(".") + 1);
-    var content = "";
-    var contentList = [];
-    var temContentList = [];
-    if (suffix.toLowerCase() != SUFFIX) {
-        throw new error("not the proper file: file: " + file);
-    } else {
-        content = fs.readFileSync(file, 'utf-8');
-        if (content == "" || content == null) {
-            return [];
-        } else {
-            // 对语法进行最基础的划分
-            return split(content);
-        }
-    }
+	if(type == "file"){
+		name = file.substring(file.lastIndexOf(args.spliter) + 1);
+	    prefix = name.substring(0, name.lastIndexOf("."));
+	    suffix = name.substring(name.lastIndexOf(".") + 1);
+	    var content = "";
+	    var contentList = [];
+	    var temContentList = [];
+	    if (suffix.toLowerCase() != SUFFIX) {
+	        throw new error("not the proper file: file: " + file);
+	    } else {
+	        content = fs.readFileSync(file, 'utf-8');
+	        if (content == "" || content == null)  return [];
+			else return split(content);
+	    }
+	}else{    											//单独传入的语句
+		if (file == "" || file == null || file == undefined) return [];
+		else return split(file);
+	}
 };
 
 ////////////////////////////////////////////////////////////////////////
@@ -167,16 +157,6 @@ var _rebuild = function(piece, index){
     return [index, rebuildpiece];
 };
 
-var getblockList = function(piece){
-    var ls = [];
-    for(var i= 0, len = piece.length;i<len; i++) {
-        if (piece[i]["type"][0] == "block") {
-            processBlock(piece[i], ls, []);
-        }
-    }
-    return ls;
-};
-
 var processBlock = function(piece, ls, seq){
     var newSeq = JSON.parse(JSON.stringify(seq));
     newSeq.push(piece["type"][1]); //复制
@@ -200,13 +180,10 @@ var includeAndExtends = function (piece) {
 	//处理 include 模板, 啥时候也离不开指针啊
 	recursionInclude(newPiece);
     //继承模板显得非常复杂
-
 	//extends 必定在第一层，而且只有一个
     for(var i= 0; i<len; i++){
         if(newPiece[i]["type"][0] == "extends"){
-            //对文件的block进行归并
-            var blockList = getblockList(newPiece);
-            var extendsPiece = generateFile(piece[index]["type"][1]);
+            var extendsPiece = generateFile(piece[i]["type"][1]);
             newPiece = processExtends(newPiece, extendsPiece);
             return newPiece;
         }
@@ -241,254 +218,116 @@ var processInclude = function(piece, index){
 
 //反客为主
 var processExtends = function (piece, extendsPiece) {
-	var pieceList = getblockList(piece);
-    var extendsList = getblockList(extendsPiece);
+	var pieceList = getPieceList(piece);
+    var extendsList = getPieceList(extendsPiece);
     //排序， 让最外围标签能够最先被替换掉
     pieceList = pieceList.sort(function(a, b) {
         return a.length > b.length;
     });
-
-	console.log("conentent block list:\n", JSON.stringify(extendsList, 0, 1));
-    //console.log("content blocklist:\n", blockList);
-	//只替换最上层的内容
-    for(var i= 0, leni=blockList.length;i<leni;i++){
-        if(blockList[i].length != 1){
+	//只替换最上层的内容, 而且只能被替换一次
+    for(var i= 0, leni=pieceList.length;i<leni;i++){
+        if(pieceList[i].length != 1){
             break;
         }else{
-			var val = matchBlockList(pieceList[i][0], extendsList);
-			console.log("val:\n", val);
-			if(val != -1){
-				replaceExtendsBlocks(piece[i], extendsPiece, extendsList[val]);
+			var matchedPiece = matchPieceList(pieceList[i][0], extendsList);
+			if(matchedPiece != -1){
+				matchedPiece = JSON.parse(matchedPiece);
+				replaceExtendsBlocks(piece[getPieceIndex(piece, matchedPiece)],
+					 extendsPiece, matchedPiece);
 			}
         }
     }
 	return extendsPiece;
 };
 
-var matchBlockList = function(value, blockList){
-	//替换所有命名相同的变量
-	for(var i in blockList){
-		//匹配成功， 之匹配第一个， 开始替换和删除
-		if(blockList[i][blockList[i].length - 1] == value){
+var getPieceList = function(piece){
+    var ls = [];
+    for(var i= 0, len = piece.length;i<len; i++) {
+        if (piece[i]["type"][0] == "block") {
+            processBlock(piece[i], ls, []);
+        }
+    }
+    return ls;
+};
+
+var getPieceIndex = function(piece, matchedPiece){
+	var a = matchedPiece[matchedPiece.length - 1];
+	for(var i=0;i<piece.length;i++){
+		if(piece[i]["type"][0] == "block" && piece[i]["type"][1] == a){
 			return i;
+		}
+	}
+}
+
+//匹配相同的量
+var matchPieceList = function(value, blockList){
+	var tem = JSON.parse(JSON.stringify(blockList));
+	var tempList = [];
+	for(var i=0,len=blockList.length;i<len;i++){
+		if(blockList[i][blockList[i].length - 1] == value){
+			var a = JSON.stringify(blockList[i]);
+			//查找相同index
+			for(var j=i+1;j<blockList.length; j++){
+				if(blockList[j] != undefined && blockList[j] != null){
+					if(JSON.stringify(blockList[j].slice(0, blockList[i].length)) == a ){
+						tempList.push(j);
+					}
+					else break;
+				}
+			}
+			//清空原数组， 保留地址
+			blockList.splice(0,blockList.length);
+			for(var k=0;k<tem.length;k++){
+				if(tempList.indexOf(k)  < 0){
+					blockList.push(tem[k]);
+				}
+			}
+			return a;
 		}
 	}
 	return -1;
 }
 
-var replaceExtendsBlocks = function(piece, extendsPiece, extendsList){
+var replaceExtendsBlocks = function(piece, extendsPiece, matchedPiece){
 	//直接遍历， 横向遍历更好，但是我不会，也不愿意想了
-	for(var i in extendsPiece){
-		if(extendsPiece[i]["type"][1] == "block" && extendsPiece[i]["type"][1] == extendsList[0]){
-			if(extendsList.length == 1){
+	for(var i=0; i<extendsPiece.length; i++){
+		if(extendsPiece[i]["type"][0] == "block" && extendsPiece[i]["type"][1] == matchedPiece[0]){
+			if(matchedPiece.length == 1){
 				extendsPiece[i] = piece;
 				return;
 			}else{
-				replaceExtendsBlocks(piece, extendsPiece[i]["children"], extendsList.slice(1));
+				replaceExtendsBlocks(piece, extendsPiece[i]["children"], matchedPiece.slice(1));
 			}
 		}
 	}
 }
 
-module.exports = {
-    generateFile : generateFile
-};
-
-
-
-
-
-
-
-
-
-
-
-
-
-/*
-var processInclude = function(piece, index){
-    var content = generateFile(piece[index]["type"][1]);
-    var head = piece.slice(0, index-1);
-    var tail = piece.slice(index+1, -1);
-    piece = [].concat(head, content, tail);
-    return piece;
-};
-*/
-
-/*
-var args = require("./args");
-var fs = require("fs");
-var utils = require("./utils")
-var SUFFIX = "yky";
-var singleMark = ["html", "blank", "extends", "include", "param"];
-var doubleMark = ["list", "map", "block"];
-
-////////////////////////////////////////////////////////////////////////
-// 对 slice 进行判断，判断他的属性，作用，返回他的具体类型
-////////////////////////////////////////////////////////////////////////
-var getSliceType = function(begin, end, content){
-	var slice = content.substring(begin, end); //  最长的是{{end block
-	//判断是否为 空字符串
-	if(utils.trim(slice).length == 0)
-		return ["blank",];
-	//单列属性
-	if(utils.startWith(utils.ltrim(slice), "{{extends"))
-		return ["extends",];
-	if(utils.startWith(utils.ltrim(slice), "{{include"))
-		return ["include",];
-	if(utils.startWith(utils.ltrim(slice), "{{`"))
-		return ["param",];
-	if(utils.startWith(utils.ltrim(slice), "{{="))
-		return ["param",];
-	//双列属性
-	if(utils.startWith(utils.ltrim(slice), "{{list"))
-		return ["list",];
-	if(utils.startWith(utils.ltrim(slice), "{{map"))
-		return ["map",];
-	if(utils.startWith(utils.ltrim(slice), "{{block"))
-		return ["block",];
-	if(utils.startWith(utils.ltrim(slice), "{{end block"))
-		return ["end", "block"];
-	if(utils.startWith(utils.ltrim(slice), "{{end map"))
-		return ["end", "map"];
-	if(utils.startWith(utils.ltrim(slice), "{{end list"))
-		return ["end", "list"];
-	//默认返回值
-	return ["html"];
-}
-
-
-////////////////////////////////////////////////////////////////////////
-// 对 slice进行拆分, 将标签进行一个大的归类，
-//  extends， block， param， list
-//  map， define 等
-////////////////////////////////////////////////////////////////////////
-var split = function(str) {
-	//获取切片点
-	var arr = [];
-	var stacklen = 0;
-	var cutPoint = [ 0, ];
-	for (var i = 0; i < str.length; i++) {
-		if (str[i] == "{" && str[i + 1] == "{") {
-			if (stacklen++ == 0) {
-				cutPoint.push(i);
+var JoinTemplate = function(piece, content, indent){
+	content = content || "";
+	indent = indent || 0;
+	for(var i=0;i<piece.length;i++){
+		if(doubleMark.indexOf(piece[i]["type"][0]) >= 0){  						//双列类型
+			content += ("\n" + printIndent(indent) + piece[i]["content"]);
+			if(piece[i]["children"].length != 0){
+				content = JoinTemplate(piece[i]["children"], content , indent+1);
 			}
-		} else if (str[i] == "}" && str[i + 1] == "}") {
-			if (stacklen-- == 1) {
-				cutPoint.push(i + 2);
-				i++;
-			}
+			content += ("\n" + printIndent(indent) + "{{end " + piece[i]["type"][0] + "}}");
+		}else{
+			content += (printIndent(indent) + piece[i]["content"]);
 		}
 	}
-	cutPoint.push(str.length);
-	//对文件进行切片
-	stacklen = 0;
-	for (i = 0, size = cutPoint.length - 1; i < size; i++) {
-		var type = getSliceType(cutPoint[i], cutPoint[i+1], str);
-		if(type[0] == "blank") continue;
-		arr.push({
-			"type":type,
-			"content":str.substring(cutPoint[i], cutPoint[i + 1])});
-	}
-	return arr;
-};
+	return content;
+}
 
-
-////////////////////////////////////////////////////////////////////////
-// 将文件拉入内存， 并处理文件
-////////////////////////////////////////////////////////////////////////
-var analysFile = function(file, type) {
-	type = type || "file";
-
-	name = file.substring(file.lastIndexOf(args.spliter) + 1);
-	prefix = name.substring(0, name.lastIndexOf("."));
-	suffix = name.substring(name.lastIndexOf(".") + 1);
+var printIndent = function(count){
 	var content = "";
-	var contentList = [];
-	var temContentList = [];
-	if (suffix.toLowerCase() != SUFFIX) {
-		throw new error("not the proper file: file: " + file);
-	} else {
-		content = fs.readFileSync(file, 'utf-8');
-		if (content == "" || content == null) {
-			return [];
-		} else {
-			// 对语法进行最基础的划分
-			return split(content);
-		}
+	for(var i=0;i<count;i++){
+		content += "\t";
 	}
-}
-
-
-////////////////////////////////////////////////////////////////////////
-// 文件处理的总入口
-////////////////////////////////////////////////////////////////////////
-var generateFile = function(fileName) {
-	//对文件进行切片
-	var splitSlice = analysFile(fileName);
-	//对切片后的文件进行重建
-	var rebuildSlice = genFun(splitSlice);
-
-	console.log("JSONED FILE\n", JSON.stringify(rebuildSlice, 4, 4), "\n\n");
-
-	return rebuildSlice;
-};
-
-////////////////////////////////////////////////////////////////////////
-// 文件处理的总入口
-////////////////////////////////////////////////////////////////////////
-var genFun = function(slice, begin, end){
-	var begin = begin || 0;
-	var end   = end   || slice.length;
-	var rebuildSlice = [];
-	var index = 0;
-
-	for(index=begin; index < end;){
-		if(singleMark.indexOf(slice[index]["type"][0]) >= 0){  //单列属性
-			rebuildSlice.push(slice[index++]);
-		}else{									  //多列属性
-			var tem = markDouble(slice, index);
-			index = tem[0];
-			rebuildSlice.push(tem[1]);
-		}
-		console.log("index:\n", index);
-	}
-	return rebuildSlice;
-}
-
-////////////////////////////////////////////////////////////////////////
-// 对 doubleMark  的处理
-////////////////////////////////////////////////////////////////////////
-var markDouble = function(slice, index){
-	var rebuildSlice = [];
-	var stacklen = 0;
-	do{
-		if(slice[index]["type"][0] == "end"){                   //处理end
-			stacklen--;
-			if(stacklen == 0){
-				index ++;
-				tem = genFun(rebuildSlice, 1);
-				rebuildSlice[0]["children"] = tem;
-				rebuildSlice = rebuildSlice[0];
-			}else{
-				rebuildSlice.push(slice[index++]);
-			}
-		}else
-
-		if(singleMark.indexOf(slice[index]["type"][0]) >= 0){    //单列属性
-			rebuildSlice.push(slice[index++]);
-		}else{													//多列属性
-			stacklen ++;
-			rebuildSlice.push(slice[index++]);
-		}
-	}while(stacklen != 0);
-
-	return [index, rebuildSlice];
+	return content;
 }
 
 module.exports = {
-	generateFile : generateFile
-}
-
-*/
+    generateFile : generateFile,
+	JoinTemplate: JoinTemplate
+};
