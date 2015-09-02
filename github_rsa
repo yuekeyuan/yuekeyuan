@@ -2,8 +2,8 @@ var args = require("./args");
 var fs = require("fs");
 var utils = require("./utils");
 var SUFFIX = args.SUFFIX;
-var singleMark = ["html", "blank", "extends", "include", "param", "=",];
-var doubleMark = ["list", "map", "block"];
+var singleMark = args.SINGLEMARK;
+var doubleMark = args.DOUBLEMARK;
 
 ////////////////////////////////////////////////////////////////////////
 // 文件处理的总入口
@@ -307,22 +307,14 @@ var JoinTemplate = function(piece, content, indent){
 	indent = indent || 0;
 	for(var i=0;i<piece.length;i++){
 		if(doubleMark.indexOf(piece[i]["type"][0]) >= 0){  						//双列类型
-			content += ("\n" + printIndent(indent) + piece[i]["content"]);
+			content += ("\n" + utils.indent(indent) + piece[i]["content"]);
 			if(piece[i]["children"].length != 0){
 				content = JoinTemplate(piece[i]["children"], content , indent+1);
 			}
-			content += ("\n" + printIndent(indent) + "{{end " + piece[i]["type"][0] + "}}");
+			content += ("\n" + utils.indent(indent) + "{{end " + piece[i]["type"][0] + "}}");
 		}else{
-			content += (printIndent(indent) + piece[i]["content"]);
+			content += (utils.indent(indent) + piece[i]["content"]);
 		}
-	}
-	return content;
-}
-
-var printIndent = function(count){
-	var content = "";
-	for(var i=0;i<count;i++){
-		content += "\t";
 	}
 	return content;
 }
@@ -331,3 +323,195 @@ module.exports = {
     generateFile : generateFile,
 	JoinTemplate: JoinTemplate
 };
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var path = require("path");
+
+var getMime = function(fileName, mimeCollection) {
+	a = mimeCollection["suffix"][fileName
+			.substring(fileName.lastIndexOf(".") + 1)];
+	console.log("filename:", fileName);
+	console.log(fileName.substring(fileName.lastIndexOf(".") + 1));
+	console.log(a);
+	return a;
+}
+
+var ltrim = function(s) {
+	return s.replace(/^\s*/, "");
+}
+
+var rtrim = function(s) {
+	return s.replace(/\s*$/, "");
+}
+
+var trim = function(s) {
+	return rtrim(ltrim(s));
+}
+
+var startWith = function(orign, str) {
+	if (str == null || str == "" || orign.length == 0
+			|| str.length > orign.length)
+		return false;
+	if (orign.substr(0, str.length) == str)
+		return true;
+	else
+		return false;
+	return true;
+}
+
+var endWith = function(orign, str) {
+	if (str == null || str == "" || orign.length == 0
+			|| str.length > orign.length)
+		return false;
+	if (orign.substring(orign.length - str.length) == str)
+		return true;
+	else
+		return false;
+	return true;
+}
+
+var indent = function(count){
+	var content = "";
+	for(var i=0;i<count;i++){
+		content += "\t";
+	}
+	return content;
+}
+
+var wrapString = function(str){
+	str=str.replace(/\r\n/g, "\\r\\n")
+	str=str.replace(/\n/g, "\\n");
+	return "\"" + str + "\"";
+}
+
+module.exports = {
+	"getMime" : getMime,
+	"ltrim" : ltrim,
+	"rtrim" : rtrim,
+	"trim" : trim,
+	"startWith" : startWith,
+	"endWith" : endWith,
+	"indent" : indent,
+	"wrapString" : wrapString,
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+os = require("os");
+var spliter = "\\";
+var newLine = os["EOL"];
+var suffix  = "yky";
+var base_dir = __dirname.substring(0, __dirname.lastIndexOf(""));
+
+var singleMark = ["html", "blank", "extends", "include", "param", "=",];
+var doubleMark = ["list", "map", "block", "if"];
+
+module.exports = {
+  spliter: spliter,
+  newLine: newLine,
+  SUFFIX : suffix,
+  BASE_DIR: base_dir,
+  SINGLEMARK: singleMark,
+  DOUBLEMARK: doubleMark
+}
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var utils = require("./utils");
+var args  = require("./args");
+var singleMark = args.SINGLEMARK;
+var doubleMark = args.DOUBLEMARK;
+
+/*
+var singleMark = ["html", "blank", "extends", "include", "param", "=",];
+var doubleMark = ["list", "map", "block"];
+*/
+
+/*
+i: indent
+g: global,
+l: local
+t: type
+*/
+
+// 只生成一个完整的， 可执行的函数
+var genChildren = function(piece, indent){
+    indent = indent || 0;
+    var list = [];
+    for(var i=0, len=piece.length;i<len; i++){
+        list.push(markFunMap[piece[i]["type"][0]](piece[i], indent));
+    }
+    return mergeSentence(list, indent);
+};
+
+var genHtml = function(piece, indent){
+    var list = [];
+    list.push("concat");
+    list.push(utils.wrapString(piece["content"]));
+    return list;
+};
+
+var genParam = function(piece, indent) {
+    var list = [];
+    list.push(["", "hello world"]);
+    return ["concat", mergeSentence(list, indent + 1)];
+};
+
+var genList = function(piece, indent) {
+    var list = [];
+    list.push(["", "hello world"]);
+    return ["concat", mergeSentence(list, indent + 1)];
+};
+
+var genMap = function(piece, indent) {
+    var list = [];
+    list.push(["", "hello world"]);
+    return ["concat", mergeSentence(list, indent + 1)];
+};
+
+var genBlock = function(piece, indent) {
+    var list = [];
+    list.push(["", "hello world"]);
+    return ["concat", mergeSentence(list, indent + 1)];
+};
+
+var genIf = function(piece, indent) {
+    var list = [];
+    list.push(["", "hello world"]);
+    return ["concat", mergeSentence(list, indent + 1)];
+};
+
+var markFunMap = {
+    "html": genHtml,
+    "=": genParam,
+    "list": genList,
+    "map": genMap,
+    "block": genBlock,
+    "if": genIf,
+};
+
+//list 必须是 字符串类型
+var mergeSentence = function(list, indent){
+
+    begin = "(function(g, l){";
+    end   = "}(g, l)";
+    var content = (utils.indent(indent) + begin + args.newLine);
+    content += (utils.indent(indent + 1) +
+        "var content = \"\";" + args.newLine);
+
+    for(var i=0, len=list.length; i<len; i++){
+        if(list[i][0] == "concat"){
+            content += (utils.indent(indent + 1) + "content += "
+                + utils.ltrim(list[i][1]) + ";" + args.newLine);
+        }else{
+            content += (utils.indent(indent + 1)
+                + utils.ltrim(list[i][1]) + ";" + args.newLine);
+        }
+    }
+
+    content += (utils.indent(indent + 1) + "return content;\n");
+
+    return content + utils.indent(indent) + end;
+};
+
+module.exports = {
+    genChildren: genChildren,
+};
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
